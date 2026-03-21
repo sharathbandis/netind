@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import Link from "next/link";
 
 export default function Feed() {
   const router = useRouter();
@@ -140,15 +141,17 @@ export default function Feed() {
 
               return (
                 <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
-                  <div className="flex items-center gap-3 mb-3">
+                  <Link href={`/profile/${post.user_id}`} className="flex items-center gap-3 mb-3 hover:opacity-80 transition-opacity w-fit">
                     <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300">
                       {post.author_name ? post.author_name.charAt(0).toUpperCase() : "U"}
                     </div>
                     <div>
-                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200">{post.author_name || "Anonymous Rebel"}</h4>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
+                       {post.author_name || "Anonymous Rebel"}
+                      </h4>
                       <p className="text-xs text-slate-500">{new Date(post.created_at).toLocaleDateString()} at {new Date(post.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                     </div>
-                  </div>
+                  </Link>
                   
                   <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{post.content}</p>
                   
