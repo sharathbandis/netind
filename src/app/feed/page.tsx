@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LogOut, Home, Users, Bell, Search, Send, Settings } from "lucide-react";
+// Notice we added the Heart icon here!
+import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -25,8 +26,13 @@ export default function Feed() {
     getUserAndPosts();
   }, [router]);
 
+  // We upgraded this to grab the posts AND their associated likes
   const fetchPosts = async () => {
-    const { data } = await supabase.from('posts').select('*').order('created_at', { ascending: false });
+    const { data } = await supabase
+      .from('posts')
+      .select('*, likes(user_id)')
+      .order('created_at', { ascending: false });
+      
     if (data) setPosts(data);
   };
 
@@ -39,6 +45,22 @@ export default function Feed() {
     setIsPublishing(false);
     if (!error) { setNewPost(""); fetchPosts(); } 
     else { alert("Error posting: " + error.message); }
+  };
+
+  // THE NEW LIKE LOGIC
+  const handleLike = async (postId: number, hasLiked: boolean) => {
+    if (!user) return;
+
+    if (hasLiked) {
+      // If they already liked it, remove the like (Unlike)
+      await supabase.from('likes').delete().match({ post_id: postId, user_id: user.id });
+    } else {
+      // If they haven't liked it, add a like
+      await supabase.from('likes').insert([{ post_id: postId, user_id: user.id }]);
+    }
+    
+    // Refresh the feed to show the updated heart and count
+    fetchPosts();
   };
 
   const handleLogout = async () => {
@@ -111,20 +133,39 @@ export default function Feed() {
           </div>
 
           <div className="space-y-4">
-            {posts.map((post) => (
-              <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300">
-                    {post.author_name ? post.author_name.charAt(0).toUpperCase() : "U"}
+            {posts.map((post) => {
+              // We check if the current user's ID exists inside the array of likes for this post
+              const userHasLiked = post.likes?.some((like: any) => like.user_id === user?.id);
+              const likeCount = post.likes?.length || 0;
+
+              return (
+                <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300">
+                      {post.author_name ? post.author_name.charAt(0).toUpperCase() : "U"}
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200">{post.author_name || "Anonymous Rebel"}</h4>
+                      <p className="text-xs text-slate-500">{new Date(post.created_at).toLocaleDateString()} at {new Date(post.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200">{post.author_name || "Anonymous Rebel"}</h4>
-                    <p className="text-xs text-slate-500">{new Date(post.created_at).toLocaleDateString()} at {new Date(post.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                  
+                  <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{post.content}</p>
+                  
+                  {/* THE LIKE BUTTON */}
+                  <div className="flex items-center gap-4 border-t border-slate-100 dark:border-slate-800/50 pt-3 mt-2">
+                    <button 
+                      onClick={() => handleLike(post.id, userHasLiked)}
+                      className={`flex items-center gap-1.5 text-sm transition-colors ${userHasLiked ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400'}`}
+                    >
+                      <Heart className={`w-4 h-4 ${userHasLiked ? 'fill-current' : ''}`} />
+                      <span className="font-medium">{likeCount}</span>
+                    </button>
                   </div>
+
                 </div>
-                <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed">{post.content}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </main>
