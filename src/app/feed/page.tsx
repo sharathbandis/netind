@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-// We added BadgeCheck to our icon imports!
 import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart, BadgeCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -10,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 export default function Feed() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+  const [currentProfile, setCurrentProfile] = useState<any>(null); // We added this to hold your sidebar profile info
   const [posts, setPosts] = useState<any[]>([]);
   const [newPost, setNewPost] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
@@ -22,16 +22,26 @@ export default function Feed() {
         return;
       }
       setUser(session.user);
+
+      // Fetch the logged-in user's profile for the sidebar
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('username, is_verified')
+        .eq('id', session.user.id)
+        .single();
+        
+      if (profileData) setCurrentProfile(profileData);
+
       fetchPosts();
     };
     getUserAndPosts();
   }, [router]);
 
-  // We upgraded this query to also fetch the author's verified status from the profiles table
+  // Notice we added 'username' to our profiles query!
   const fetchPosts = async () => {
     const { data, error } = await supabase
       .from('posts')
-      .select('*, likes(user_id), profiles(is_verified)')
+      .select('*, likes(user_id), profiles(is_verified, username)')
       .order('created_at', { ascending: false });
       
     if (error) {
@@ -106,10 +116,21 @@ export default function Feed() {
                 {user?.user_metadata?.full_name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
               </span>
             </div>
+            
             <h2 className="text-lg font-bold text-slate-900 dark:text-white relative z-10 truncate flex items-center justify-center gap-1">
               {user?.user_metadata?.full_name || user?.email?.split('@')[0] || "Netind User"}
+              {currentProfile?.is_verified && <BadgeCheck className="w-5 h-5 text-blue-500" title="Verified User" />}
             </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 relative z-10 mb-4">Reclaiming the network.</p>
+            
+            {/* Display current user's handle in sidebar */}
+            {currentProfile?.username && (
+              <p className="text-sm font-medium text-indigo-600 dark:text-indigo-400 relative z-10 mb-1 text-center">
+                @{currentProfile.username}
+              </p>
+            )}
+
+            <p className="text-sm text-slate-500 dark:text-slate-400 relative z-10 mb-4 text-center mt-1">Reclaiming the network.</p>
+            
             <div className="border-t border-slate-200 dark:border-slate-800 pt-4 flex justify-between text-sm transition-colors duration-300">
               <span className="text-slate-500">Connections</span>
               <span className="text-indigo-600 dark:text-indigo-400 font-medium">0</span>
@@ -136,23 +157,30 @@ export default function Feed() {
               const userHasLiked = post.likes?.some((like: any) => like.user_id === user?.id);
               const likeCount = post.likes?.length || 0;
               
-              // Check if the author's profile has the is_verified flag
               const isVerified = post.profiles?.is_verified || false;
+              const authorUsername = post.profiles?.username || null;
 
               return (
                 <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
                   
-                  <Link href={`/profile/${post.user_id}`} className="flex items-center gap-3 mb-3 hover:opacity-80 transition-opacity w-fit">
-                    <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300">
+                  <Link href={`/profile/${post.user_id}`} className="flex items-start gap-3 mb-3 hover:opacity-80 transition-opacity w-fit">
+                    <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300 mt-1">
                       {post.author_name ? post.author_name.charAt(0).toUpperCase() : "U"}
                     </div>
                     <div>
-                      {/* Here is where the magic happens */}
                       <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors flex items-center gap-1">
                         {post.author_name || "Anonymous Rebel"}
                         {isVerified && <BadgeCheck className="w-4 h-4 text-blue-500" title="Verified User" />}
                       </h4>
-                      <p className="text-xs text-slate-500">{new Date(post.created_at).toLocaleDateString()} at {new Date(post.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                      
+                      {/* Here is the brand new handle display logic */}
+                      <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                        {authorUsername && (
+                          <span className="font-medium text-indigo-600 dark:text-indigo-400">@{authorUsername}</span>
+                        )}
+                        {authorUsername && <span>•</span>}
+                        <span>{new Date(post.created_at).toLocaleDateString()} at {new Date(post.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                      </div>
                     </div>
                   </Link>
                   
