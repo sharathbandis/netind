@@ -417,7 +417,7 @@ export default function Feed() {
                       <div>
                         <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors flex items-center gap-1">
                           {displayPost.author_name || "Anonymous Rebel"}
-                          {displayVerified && <BadgeCheck className="w-4 h-4 text-blue-500" title="Verified User" />}
+                          {displayVerified && <BadgeCheck className="w-4 h-4 text-blue-500" />}
                         </h4>
                         <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
                           {displayUsername && <span className="font-medium text-indigo-600 dark:text-indigo-400">@{displayUsername}</span>}
