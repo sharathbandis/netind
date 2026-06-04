@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart, BadgeCheck, MessageCircle, Image as ImageIcon, X, Repeat, Trash2, Loader2 } from "lucide-react";
+import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart, BadgeCheck, MessageCircle, Image as ImageIcon, X, Repeat, Trash2, Loader2, Bookmark } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -25,7 +25,6 @@ export default function Feed() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // NEW: Notification States
   const [notifications, setNotifications] = useState<any[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const unreadCount = notifications.filter(n => !n.is_read).length;
@@ -43,7 +42,7 @@ export default function Feed() {
       if (profileData) setCurrentProfile(profileData);
 
       fetchPosts();
-      fetchNotifications(session.user.id); // Fetch the bell data!
+      fetchNotifications(session.user.id);
     };
     getUserAndPosts();
   }, [router]);
@@ -64,11 +63,13 @@ export default function Feed() {
   }, [searchQuery]);
 
   const fetchPosts = async () => {
+    // UPDATED QUERY: We are now fetching the bookmarks array attached to the post
     const { data, error } = await supabase
       .from('posts')
       .select(`
         *, 
         likes(user_id), 
+        bookmarks(user_id),
         profiles(is_verified, username, avatar_url, full_name),
         comments(*, profiles(username, avatar_url, full_name, is_verified))
       `)
@@ -83,18 +84,13 @@ export default function Feed() {
     }
   };
 
-  // THE NEW NOTIFICATION ENGINE
   const fetchNotifications = async (userId: string) => {
     const { data } = await supabase
       .from('notifications')
-      .select(`
-        *,
-        actor:profiles!notifications_actor_id_fkey(full_name, username, avatar_url, is_verified)
-      `)
+      .select(`*, actor:profiles!notifications_actor_id_fkey(full_name, username, avatar_url, is_verified)`)
       .eq('recipient_id', userId)
       .order('created_at', { ascending: false })
       .limit(20);
-      
     if (data) setNotifications(data);
   };
 
@@ -165,10 +161,20 @@ export default function Feed() {
       await supabase.from('likes').delete().match({ post_id: postId, user_id: user.id });
     } else {
       await supabase.from('likes').insert([{ post_id: postId, user_id: user.id }]);
-      // SILENTLY TRIGGER NOTIFICATION (Don't notify yourself)
       if (postAuthorId !== user.id) {
         await supabase.from('notifications').insert([{ recipient_id: postAuthorId, actor_id: user.id, type: 'like', post_id: postId }]);
       }
+    }
+    fetchPosts();
+  };
+
+  // THE NEW BOOKMARK LOGIC
+  const handleBookmark = async (postId: number, hasBookmarked: boolean) => {
+    if (!user) return;
+    if (hasBookmarked) {
+      await supabase.from('bookmarks').delete().match({ post_id: postId, user_id: user.id });
+    } else {
+      await supabase.from('bookmarks').insert([{ post_id: postId, user_id: user.id }]);
     }
     fetchPosts();
   };
@@ -182,7 +188,6 @@ export default function Feed() {
     if (!error) { 
       setCommentText(""); 
       fetchPosts(); 
-      // SILENTLY TRIGGER NOTIFICATION
       if (postAuthorId !== user.id) {
         await supabase.from('notifications').insert([{ recipient_id: postAuthorId, actor_id: user.id, type: 'comment', post_id: postId }]);
       }
@@ -199,7 +204,6 @@ export default function Feed() {
     
     if (!error) {
       fetchPosts();
-      // SILENTLY TRIGGER NOTIFICATION
       if (postAuthorId !== user.id) {
         await supabase.from('notifications').insert([{ recipient_id: postAuthorId, actor_id: user.id, type: 'repost', post_id: postId }]);
       }
@@ -254,9 +258,14 @@ export default function Feed() {
 
         <div className="flex items-center gap-4 md:gap-6">
           <button className="text-indigo-600 dark:text-indigo-400"><Home className="w-5 h-5 md:w-6 md:h-6" /></button>
+          
+          {/* THE NEW BOOKMARKS ICON IN NAVBAR */}
+          <Link href="/bookmarks" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors" title="Bookmarks">
+            <Bookmark className="w-5 h-5 md:w-6 md:h-6" />
+          </Link>
+
           <button className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors"><Users className="w-5 h-5 md:w-6 md:h-6" /></button>
           
-          {/* UPGRADED BELL ICON */}
           <div className="relative">
             <button 
               onClick={() => {
@@ -274,7 +283,6 @@ export default function Feed() {
               )}
             </button>
 
-            {/* NOTIFICATIONS DROPDOWN */}
             {showNotifications && (
               <div className="absolute top-full mt-4 right-[-60px] md:right-0 w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl overflow-hidden z-50">
                 <div className="p-3 border-b border-slate-100 dark:border-slate-800/50">
@@ -372,6 +380,9 @@ export default function Feed() {
         <div className="space-y-4">
           {posts.map((post) => {
             const userHasLiked = post.likes?.some((like: any) => like.user_id === user?.id);
+            // NEW: Check if the current user has bookmarked this post
+            const userHasBookmarked = post.bookmarks?.some((bookmark: any) => bookmark.user_id === user?.id);
+            
             const likeCount = post.likes?.length || 0;
             const commentCount = post.comments?.length || 0;
             const isCommentsOpen = activeCommentPostId === post.id;
@@ -415,7 +426,7 @@ export default function Feed() {
                         {displayAvatar ? <img src={displayAvatar} alt="Avatar" className="w-full h-full object-cover" /> : (displayPost.author_name ? displayPost.author_name.charAt(0).toUpperCase() : "U")}
                       </div>
                       <div>
-                        <h4 className="text-sm font-bold text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors flex items-center gap-1">
+                        <h4 className="text-sm font-bold flex items-center gap-1 text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
                           {displayPost.author_name || "Anonymous Rebel"}
                           {displayVerified && <BadgeCheck className="w-4 h-4 text-blue-500" />}
                         </h4>
@@ -442,21 +453,29 @@ export default function Feed() {
                   )}
                 </div>
                 
-                <div className="flex items-center gap-6 border-t border-slate-100 dark:border-slate-800/50 pt-3 mt-3">
-                  <button onClick={() => handleLike(displayPost.user_id, post.id, userHasLiked)} className={`flex items-center gap-1.5 text-sm transition-colors ${userHasLiked ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400'}`}>
-                    <Heart className={`w-4 h-4 ${userHasLiked ? 'fill-current' : ''}`} />
-                    <span className="font-medium">{likeCount}</span>
-                  </button>
-                  <button onClick={() => { setActiveCommentPostId(isCommentsOpen ? null : post.id); setCommentText(""); }} className={`flex items-center gap-1.5 text-sm transition-colors ${isCommentsOpen ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400'}`}>
-                    <MessageCircle className={`w-4 h-4 ${isCommentsOpen ? 'fill-current' : ''}`} />
-                    <span className="font-medium">{commentCount}</span>
-                  </button>
-                  {!isRepost && ( 
-                    <button onClick={() => handleRepost(displayPost.user_id, post.id)} className="flex items-center gap-1.5 text-sm transition-colors text-slate-500 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400">
-                      <Repeat className="w-4 h-4" />
-                      <span className="hidden sm:inline">Repost</span>
+                {/* UPGRADED ENGAGEMENT BAR WITH BOOKMARK */}
+                <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/50 pt-3 mt-3">
+                  <div className="flex items-center gap-6">
+                    <button onClick={() => handleLike(displayPost.user_id, post.id, userHasLiked)} className={`flex items-center gap-1.5 text-sm transition-colors ${userHasLiked ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400'}`}>
+                      <Heart className={`w-4 h-4 ${userHasLiked ? 'fill-current' : ''}`} />
+                      <span className="font-medium">{likeCount}</span>
                     </button>
-                  )}
+                    <button onClick={() => { setActiveCommentPostId(isCommentsOpen ? null : post.id); setCommentText(""); }} className={`flex items-center gap-1.5 text-sm transition-colors ${isCommentsOpen ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400'}`}>
+                      <MessageCircle className={`w-4 h-4 ${isCommentsOpen ? 'fill-current' : ''}`} />
+                      <span className="font-medium">{commentCount}</span>
+                    </button>
+                    {!isRepost && ( 
+                      <button onClick={() => handleRepost(displayPost.user_id, post.id)} className="flex items-center gap-1.5 text-sm transition-colors text-slate-500 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400">
+                        <Repeat className="w-4 h-4" />
+                        <span className="hidden sm:inline">Repost</span>
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* BOOKMARK BUTTON */}
+                  <button onClick={() => handleBookmark(post.id, userHasBookmarked)} className={`p-1.5 rounded-full transition-colors ${userHasBookmarked ? 'text-amber-500' : 'text-slate-500 dark:text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30'}`}>
+                    <Bookmark className={`w-4 h-4 ${userHasBookmarked ? 'fill-current' : ''}`} />
+                  </button>
                 </div>
 
                 {isCommentsOpen && (
