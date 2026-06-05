@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart, BadgeCheck, MessageCircle, Image as ImageIcon, X, Repeat, Loader2, Bookmark } from "lucide-react";
+import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart, BadgeCheck, MessageCircle, Image as ImageIcon, X, Repeat, Trash2, Loader2, Bookmark, TrendingUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -16,6 +16,8 @@ export default function Feed() {
 
   const [activeTab, setActiveTab] = useState<'foryou' | 'following'>('foryou');
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
+
+  const [trendingTags, setTrendingTags] = useState<{tag: string, count: number}[]>([]);
 
   const [activeCommentPostId, setActiveCommentPostId] = useState<number | null>(null);
   const [commentText, setCommentText] = useState("");
@@ -45,6 +47,7 @@ export default function Feed() {
       if (profileData) setCurrentProfile(profileData);
 
       fetchNotifications(session.user.id);
+      fetchTrendingTags();
     };
     initApp();
   }, [router]);
@@ -70,6 +73,39 @@ export default function Feed() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
 
+  const fetchTrendingTags = async () => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const { data } = await supabase
+      .from('posts')
+      .select('content')
+      .gte('created_at', sevenDaysAgo.toISOString());
+
+    if (data) {
+      const tagCounts: Record<string, number> = {};
+      
+      data.forEach(post => {
+        if (post.content) {
+          const tags = post.content.match(/(#[a-zA-Z0-9_]+)/g);
+          if (tags) {
+            tags.forEach(tag => {
+              const cleanTag = tag.toLowerCase();
+              tagCounts[cleanTag] = (tagCounts[cleanTag] || 0) + 1;
+            });
+          }
+        }
+      });
+
+      const sortedTags = Object.entries(tagCounts)
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5); 
+
+      setTrendingTags(sortedTags);
+    }
+  };
+
   const fetchPosts = async (tab: 'foryou' | 'following') => {
     setIsLoadingFeed(true);
     
@@ -91,8 +127,6 @@ export default function Feed() {
         .eq('follower_id', user.id);
       
       const followingIds = follows ? follows.map(f => f.following_id) : [];
-      // STRICT FOLLOWING UX: We removed followingIds.push(user.id) so you don't see your own posts here anymore
-
       query = query.in('user_id', followingIds);
     }
       
@@ -175,10 +209,25 @@ export default function Feed() {
       setNewPost("");
       removeMedia();
       fetchPosts(activeTab);
+      fetchTrendingTags();
     } catch (error: any) {
       alert("Error posting: " + error.message);
     } finally {
       setIsPublishing(false);
+    }
+  };
+
+  const handleDeletePost = async (postId: number, imageUrl: string | null) => {
+    if (!window.confirm("Are you sure you want to delete this post?")) return;
+    try {
+      if (imageUrl) {
+        const fileName = imageUrl.split('/').pop();
+        if (fileName) await supabase.storage.from('post_media').remove([fileName]);
+      }
+      await supabase.from('posts').delete().eq('id', postId);
+      fetchPosts(activeTab);
+    } catch (error: any) {
+      alert("Error deleting post: " + error.message);
     }
   };
 
@@ -374,200 +423,240 @@ export default function Feed() {
         </div>
       </nav>
 
-      <main className="max-w-2xl mx-auto mt-4 px-4 space-y-6 pb-12">
+      {/* RESPONSIVE LAYOUT FIX: Changed gap and added min-w-0 to allow feed to compress properly on 14-inch laptops */}
+      <main className="max-w-5xl mx-auto mt-4 px-4 md:px-6 pb-12 flex gap-6 lg:gap-8 items-start">
         
-        <div className="flex border-b border-slate-200 dark:border-slate-800 mb-2 bg-slate-50 dark:bg-slate-950 sticky top-[60px] z-40">
-          <button 
-            onClick={() => setActiveTab('foryou')}
-            className={`flex-1 py-4 text-sm font-bold transition-colors relative ${activeTab === 'foryou' ? 'text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-          >
-            For You
-            {activeTab === 'foryou' && <div className="absolute bottom-0 left-0 w-full h-1 bg-indigo-500 rounded-t-full"></div>}
-          </button>
-          <button 
-            onClick={() => setActiveTab('following')}
-            className={`flex-1 py-4 text-sm font-bold transition-colors relative ${activeTab === 'following' ? 'text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
-          >
-            Following
-            {activeTab === 'following' && <div className="absolute bottom-0 left-0 w-full h-1 bg-indigo-500 rounded-t-full"></div>}
-          </button>
-        </div>
+        {/* LEFT/MAIN COLUMN (The Feed) */}
+        <div className="flex-1 min-w-0 w-full max-w-2xl">
+          <div className="flex border-b border-slate-200 dark:border-slate-800 mb-2 bg-slate-50 dark:bg-slate-950 sticky top-[60px] z-40">
+            <button 
+              onClick={() => setActiveTab('foryou')}
+              className={`flex-1 py-4 text-sm font-bold transition-colors relative ${activeTab === 'foryou' ? 'text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+            >
+              For You
+              {activeTab === 'foryou' && <div className="absolute bottom-0 left-0 w-full h-1 bg-indigo-500 rounded-t-full"></div>}
+            </button>
+            <button 
+              onClick={() => setActiveTab('following')}
+              className={`flex-1 py-4 text-sm font-bold transition-colors relative ${activeTab === 'following' ? 'text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+            >
+              Following
+              {activeTab === 'following' && <div className="absolute bottom-0 left-0 w-full h-1 bg-indigo-500 rounded-t-full"></div>}
+            </button>
+          </div>
 
-        <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 transition-colors duration-300 shadow-sm dark:shadow-none">
-          <form onSubmit={handleCreatePost}>
-            <textarea value={newPost} onChange={(e) => setNewPost(e.target.value)} placeholder="What are you building? (No humblebrags or corporate jargon allowed)" className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none min-h-[80px]" />
-            
-            {mediaPreview && (
-              <div className="relative mt-3 inline-block">
-                <img src={mediaPreview} alt="Preview" className="h-24 w-auto rounded-lg border border-slate-200 dark:border-slate-700 object-cover" />
-                <button type="button" onClick={removeMedia} className="absolute -top-2 -right-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full p-1 hover:scale-110 transition-transform">
-                  <X className="w-3 h-3" />
+          <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 transition-colors duration-300 shadow-sm dark:shadow-none mb-6">
+            <form onSubmit={handleCreatePost}>
+              <textarea value={newPost} onChange={(e) => setNewPost(e.target.value)} placeholder="What are you building? (No humblebrags or corporate jargon allowed)" className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none min-h-[80px]" />
+              
+              {mediaPreview && (
+                <div className="relative mt-3 inline-block">
+                  <img src={mediaPreview} alt="Preview" className="h-24 w-auto rounded-lg border border-slate-200 dark:border-slate-700 object-cover" />
+                  <button type="button" onClick={removeMedia} className="absolute -top-2 -right-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-full p-1 hover:scale-110 transition-transform">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/50">
+                <label className="cursor-pointer p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full transition-colors flex items-center gap-2 text-sm font-medium">
+                  <ImageIcon className="w-5 h-5" />
+                  <span className="hidden sm:inline">Add Media</span>
+                  <input type="file" accept="image/*" onChange={handleFileSelect} className="hidden" disabled={isPublishing} />
+                </label>
+                <button type="submit" disabled={isPublishing || (!newPost.trim() && !mediaFile)} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
+                  {isPublishing ? "Publishing..." : "Publish"}
+                  {!isPublishing && <Send className="w-4 h-4" />}
                 </button>
               </div>
-            )}
-
-            <div className="flex justify-between items-center mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/50">
-              <label className="cursor-pointer p-2 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-full transition-colors flex items-center gap-2 text-sm font-medium">
-                <ImageIcon className="w-5 h-5" />
-                <span className="hidden sm:inline">Add Media</span>
-                <input type="file" accept="image/*" onChange={handleFileSelect} className="hidden" disabled={isPublishing} />
-              </label>
-              <button type="submit" disabled={isPublishing || (!newPost.trim() && !mediaFile)} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm">
-                {isPublishing ? "Publishing..." : "Publish"}
-                {!isPublishing && <Send className="w-4 h-4" />}
-              </button>
-            </div>
-          </form>
-        </div>
-
-        {isLoadingFeed ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="w-8 h-8 text-slate-400 animate-spin" />
+            </form>
           </div>
-        ) : (
-          <div className="space-y-4">
-            {posts.length === 0 ? (
-              <div className="text-center p-8 text-slate-500 border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/50 shadow-sm">
-                {activeTab === 'following' 
-                  ? "You aren't following anyone yet, or they haven't posted." 
-                  : "No posts found. Be the first to build in public!"}
-              </div>
-            ) : (
-              posts.map((post) => {
-                const userHasLiked = post.likes?.some((like: any) => like.user_id === user?.id);
-                const userHasBookmarked = post.bookmarks?.some((bookmark: any) => bookmark.user_id === user?.id);
-                
-                const likeCount = post.likes?.length || 0;
-                const commentCount = post.comments?.length || 0;
-                const isCommentsOpen = activeCommentPostId === post.id;
 
-                let isRepost = false;
-                let displayPost = post;
-                let displayProfile = post.profiles;
+          {isLoadingFeed ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="w-8 h-8 text-slate-400 animate-spin" />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {posts.length === 0 ? (
+                <div className="text-center p-8 text-slate-500 border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/50 shadow-sm">
+                  {activeTab === 'following' 
+                    ? "You aren't following anyone yet, or they haven't posted." 
+                    : "No posts found. Be the first to build in public!"}
+                </div>
+              ) : (
+                posts.map((post) => {
+                  const userHasLiked = post.likes?.some((like: any) => like.user_id === user?.id);
+                  const userHasBookmarked = post.bookmarks?.some((bookmark: any) => bookmark.user_id === user?.id);
+                  
+                  const likeCount = post.likes?.length || 0;
+                  const commentCount = post.comments?.length || 0;
+                  const isCommentsOpen = activeCommentPostId === post.id;
 
-                if (post.original_post_id) {
-                   isRepost = true;
-                   const localOriginal = posts.find(p => p.id === post.original_post_id);
-                   if (localOriginal) {
-                     displayPost = localOriginal;
-                     displayProfile = localOriginal.profiles;
-                   } else {
-                     displayPost = { ...post, content: "[This original post was deleted]", image_url: null };
-                     displayProfile = null;
-                   }
-                }
-                if (Array.isArray(displayProfile)) displayProfile = displayProfile[0];
+                  let isRepost = false;
+                  let displayPost = post;
+                  let displayProfile = post.profiles;
 
-                const displayVerified = displayProfile?.is_verified || false;
-                const displayUsername = displayProfile?.username || null;
-                const displayAvatar = displayProfile?.avatar_url || null;
+                  if (post.original_post_id) {
+                     isRepost = true;
+                     const localOriginal = posts.find(p => p.id === post.original_post_id);
+                     if (localOriginal) {
+                       displayPost = localOriginal;
+                       displayProfile = localOriginal.profiles;
+                     } else {
+                       displayPost = { ...post, content: "[This original post was deleted]", image_url: null };
+                       displayProfile = null;
+                     }
+                  }
+                  if (Array.isArray(displayProfile)) displayProfile = displayProfile[0];
 
-                return (
-                  <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
-                    
-                    {isRepost && (
-                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium mb-3 ml-2">
-                        <Repeat className="w-3.5 h-3.5" />
-                        <span>{post.author_name} reposted</span>
-                      </div>
-                    )}
+                  const displayVerified = displayProfile?.is_verified || false;
+                  const displayUsername = displayProfile?.username || null;
+                  const displayAvatar = displayProfile?.avatar_url || null;
 
-                    <div className={isRepost ? "border border-slate-100 dark:border-slate-800/80 rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/30" : ""}>
-                      <div className="flex justify-between items-start mb-3">
-                        <Link href={`/profile/${displayPost.user_id}`} className="flex items-start gap-3 hover:opacity-80 transition-opacity">
-                          <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300 mt-1 overflow-hidden shrink-0">
-                            {displayAvatar ? <img src={displayAvatar} alt="Avatar" className="w-full h-full object-cover" /> : (displayPost.author_name ? displayPost.author_name.charAt(0).toUpperCase() : "U")}
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-bold flex items-center gap-1 text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
-                              {displayPost.author_name || "Anonymous Rebel"}
-                              {displayVerified && <BadgeCheck className="w-4 h-4 text-blue-500" />}
-                            </h4>
-                            <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                              {displayUsername && <span className="font-medium text-indigo-600 dark:text-indigo-400">@{displayUsername}</span>}
-                              {displayUsername && <span>•</span>}
-                              <span>{displayPost.created_at ? new Date(displayPost.created_at).toLocaleDateString() : "Just now"}</span>
-                            </div>
-                          </div>
-                        </Link>
-                      </div>
+                  return (
+                    <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
                       
-                      {displayPost.content && <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{renderContentWithTags(displayPost.content)}</p>}
-                      {displayPost.image_url && (
-                        <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-900/50">
-                          <img src={displayPost.image_url} alt="Post attachment" className="w-full h-auto max-h-[500px] object-cover" />
+                      {isRepost && (
+                        <div className="flex items-center gap-2 text-xs text-slate-500 font-medium mb-3 ml-2">
+                          <Repeat className="w-3.5 h-3.5" />
+                          <span>{post.author_name} reposted</span>
+                        </div>
+                      )}
+
+                      <div className={isRepost ? "border border-slate-100 dark:border-slate-800/80 rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/30" : ""}>
+                        <div className="flex justify-between items-start mb-3">
+                          <Link href={`/profile/${displayPost.user_id}`} className="flex items-start gap-3 hover:opacity-80 transition-opacity">
+                            <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300 mt-1 overflow-hidden shrink-0">
+                              {displayAvatar ? <img src={displayAvatar} alt="Avatar" className="w-full h-full object-cover" /> : (displayPost.author_name ? displayPost.author_name.charAt(0).toUpperCase() : "U")}
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold flex items-center gap-1 text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
+                                {displayPost.author_name || "Anonymous Rebel"}
+                                {displayVerified && <BadgeCheck className="w-4 h-4 text-blue-500" />}
+                              </h4>
+                              <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                                {displayUsername && <span className="font-medium text-indigo-600 dark:text-indigo-400">@{displayUsername}</span>}
+                                {displayUsername && <span>•</span>}
+                                <span>{displayPost.created_at ? new Date(displayPost.created_at).toLocaleDateString() : "Just now"}</span>
+                              </div>
+                            </div>
+                          </Link>
+                        </div>
+                        
+                        {displayPost.content && <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{renderContentWithTags(displayPost.content)}</p>}
+                        {displayPost.image_url && (
+                          <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-900/50">
+                            <img src={displayPost.image_url} alt="Post attachment" className="w-full h-auto max-h-[500px] object-cover" />
+                          </div>
+                        )}
+                      </div>
+                        
+                      <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/50 pt-3 mt-3">
+                        <div className="flex items-center gap-6">
+                          <button onClick={() => handleLike(displayPost.user_id, post.id, userHasLiked)} className={`flex items-center gap-1.5 text-sm transition-colors ${userHasLiked ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400'}`}>
+                            <Heart className={`w-4 h-4 ${userHasLiked ? 'fill-current' : ''}`} />
+                            <span className="font-medium">{likeCount}</span>
+                          </button>
+                          <button onClick={() => { setActiveCommentPostId(isCommentsOpen ? null : post.id); setCommentText(""); }} className={`flex items-center gap-1.5 text-sm transition-colors ${isCommentsOpen ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400'}`}>
+                            <MessageCircle className={`w-4 h-4 ${isCommentsOpen ? 'fill-current' : ''}`} />
+                            <span className="font-medium">{commentCount}</span>
+                          </button>
+                          {!isRepost && ( 
+                            <button onClick={() => handleRepost(displayPost.user_id, post.id)} className="flex items-center gap-1.5 text-sm transition-colors text-slate-500 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400">
+                              <Repeat className="w-4 h-4" />
+                              <span className="hidden sm:inline">Repost</span>
+                            </button>
+                          )}
+                        </div>
+                        
+                        <button onClick={() => handleBookmark(post.id, userHasBookmarked)} className={`p-1.5 rounded-full transition-colors ${userHasBookmarked ? 'text-amber-500' : 'text-slate-500 dark:text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30'}`}>
+                          <Bookmark className={`w-4 h-4 ${userHasBookmarked ? 'fill-current' : ''}`} />
+                        </button>
+                      </div>
+
+                      {isCommentsOpen && (
+                        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+                          <div className="space-y-4 mb-4 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                            {post.comments?.length === 0 ? (
+                              <p className="text-sm text-center text-slate-500 py-2">No comments yet. Be the first!</p>
+                            ) : (
+                              post.comments?.map((comment: any) => {
+                                let cProfile = comment.profiles;
+                                if (Array.isArray(cProfile)) cProfile = cProfile[0];
+                                return (
+                                  <div key={comment.id} className="flex gap-3">
+                                    <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 text-xs">
+                                      {cProfile?.avatar_url ? <img src={cProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (cProfile?.full_name ? cProfile.full_name.charAt(0).toUpperCase() : "U")}
+                                    </div>
+                                    <div className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-2xl rounded-tl-none px-4 py-2.5">
+                                      <div className="flex items-center gap-1 mb-0.5">
+                                        <span className="text-sm font-bold text-slate-900 dark:text-slate-200">{cProfile?.full_name || "User"}</span>
+                                        {cProfile?.is_verified && <BadgeCheck className="w-3.5 h-3.5 text-blue-500" />}
+                                      </div>
+                                      <p className="text-sm text-slate-700 dark:text-slate-300">{comment.content}</p>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                          <form onSubmit={(e) => handleSubmitComment(e, displayPost.user_id, post.id)} className="flex gap-3 items-start">
+                            <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 mt-0.5">
+                              {currentProfile?.avatar_url ? <img src={currentProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (currentProfile?.full_name?.charAt(0).toUpperCase() || "U")}
+                            </div>
+                            <div className="flex-1 relative">
+                              <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment..." className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-2 pr-12 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-colors" />
+                              <button type="submit" disabled={!commentText.trim() || isCommenting} className="absolute right-1.5 top-1.5 p-1 text-white bg-indigo-600 hover:bg-indigo-700 rounded-full disabled:opacity-50 transition-colors">
+                                <Send className="w-3.5 h-3.5 -ml-0.5" />
+                              </button>
+                            </div>
+                          </form>
                         </div>
                       )}
                     </div>
-                    
-                    <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/50 pt-3 mt-3">
-                      <div className="flex items-center gap-6">
-                        <button onClick={() => handleLike(displayPost.user_id, post.id, userHasLiked)} className={`flex items-center gap-1.5 text-sm transition-colors ${userHasLiked ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400'}`}>
-                          <Heart className={`w-4 h-4 ${userHasLiked ? 'fill-current' : ''}`} />
-                          <span className="font-medium">{likeCount}</span>
-                        </button>
-                        <button onClick={() => { setActiveCommentPostId(isCommentsOpen ? null : post.id); setCommentText(""); }} className={`flex items-center gap-1.5 text-sm transition-colors ${isCommentsOpen ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400'}`}>
-                          <MessageCircle className={`w-4 h-4 ${isCommentsOpen ? 'fill-current' : ''}`} />
-                          <span className="font-medium">{commentCount}</span>
-                        </button>
-                        {!isRepost && ( 
-                          <button onClick={() => handleRepost(displayPost.user_id, post.id)} className="flex items-center gap-1.5 text-sm transition-colors text-slate-500 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400">
-                            <Repeat className="w-4 h-4" />
-                            <span className="hidden sm:inline">Repost</span>
-                          </button>
-                        )}
-                      </div>
-                      
-                      <button onClick={() => handleBookmark(post.id, userHasBookmarked)} className={`p-1.5 rounded-full transition-colors ${userHasBookmarked ? 'text-amber-500' : 'text-slate-500 dark:text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30'}`}>
-                        <Bookmark className={`w-4 h-4 ${userHasBookmarked ? 'fill-current' : ''}`} />
-                      </button>
-                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
 
-                    {isCommentsOpen && (
-                      <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-                        <div className="space-y-4 mb-4 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                          {post.comments?.length === 0 ? (
-                            <p className="text-sm text-center text-slate-500 py-2">No comments yet. Be the first!</p>
-                          ) : (
-                            post.comments?.map((comment: any) => {
-                              let cProfile = comment.profiles;
-                              if (Array.isArray(cProfile)) cProfile = cProfile[0];
-                              return (
-                                <div key={comment.id} className="flex gap-3">
-                                  <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 text-xs">
-                                    {cProfile?.avatar_url ? <img src={cProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (cProfile?.full_name ? cProfile.full_name.charAt(0).toUpperCase() : "U")}
-                                  </div>
-                                  <div className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-2xl rounded-tl-none px-4 py-2.5">
-                                    <div className="flex items-center gap-1 mb-0.5">
-                                      <span className="text-sm font-bold text-slate-900 dark:text-slate-200">{cProfile?.full_name || "User"}</span>
-                                      {cProfile?.is_verified && <BadgeCheck className="w-3.5 h-3.5 text-blue-500" />}
-                                    </div>
-                                    <p className="text-sm text-slate-700 dark:text-slate-300">{comment.content}</p>
-                                  </div>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                        <form onSubmit={(e) => handleSubmitComment(e, displayPost.user_id, post.id)} className="flex gap-3 items-start">
-                          <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 mt-0.5">
-                            {currentProfile?.avatar_url ? <img src={currentProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (currentProfile?.full_name?.charAt(0).toUpperCase() || "U")}
-                          </div>
-                          <div className="flex-1 relative">
-                            <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment..." className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-2 pr-12 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-colors" />
-                            <button type="submit" disabled={!commentText.trim() || isCommenting} className="absolute right-1.5 top-1.5 p-1 text-white bg-indigo-600 hover:bg-indigo-700 rounded-full disabled:opacity-50 transition-colors">
-                              <Send className="w-3.5 h-3.5 -ml-0.5" />
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
+        {/* RESPONSIVE LAYOUT FIX: Changed from lg:block to md:block and reduced width on smaller tablets so it fits alongside the feed */}
+        {/* RIGHT COLUMN (The Trending Sidebar) */}
+        <div className="hidden md:block w-64 lg:w-80 shrink-0 sticky top-[76px]">
+          <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
+            <h2 className="font-bold text-lg mb-4 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-indigo-500" />
+              What's Happening
+            </h2>
+            
+            {trendingTags.length === 0 ? (
+              <p className="text-sm text-slate-500 py-4 text-center">No trending topics yet. Start the conversation!</p>
+            ) : (
+              <div className="space-y-4">
+                {trendingTags.map((tagObj, index) => (
+                  <Link 
+                    key={index} 
+                    href={`/tag/${tagObj.tag.slice(1)}`}
+                    className="block group"
+                  >
+                    <p className="text-xs text-slate-500 mb-0.5 font-medium">Trending</p>
+                    <p className="font-bold text-slate-900 dark:text-slate-200 group-hover:text-indigo-500 transition-colors">
+                      {tagObj.tag}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">{tagObj.count} {tagObj.count === 1 ? 'post' : 'posts'}</p>
+                  </Link>
+                ))}
+              </div>
             )}
           </div>
-        )}
+
+          <div className="mt-4 text-xs text-slate-500 text-center px-4">
+            <p>© 2026 Netind. Built by you.</p>
+          </div>
+        </div>
+
       </main>
     </div>
   );
