@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart, BadgeCheck, MessageCircle, Image as ImageIcon, X, Repeat, Trash2, Loader2, Bookmark } from "lucide-react";
+import { LogOut, Home, Users, Bell, Search, Send, Settings, Heart, BadgeCheck, MessageCircle, Image as ImageIcon, X, Repeat, Loader2, Bookmark } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -13,6 +13,9 @@ export default function Feed() {
   const [posts, setPosts] = useState<any[]>([]);
   const [newPost, setNewPost] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<'foryou' | 'following'>('foryou');
+  const [isLoadingFeed, setIsLoadingFeed] = useState(true);
 
   const [activeCommentPostId, setActiveCommentPostId] = useState<number | null>(null);
   const [commentText, setCommentText] = useState("");
@@ -30,7 +33,7 @@ export default function Feed() {
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
   useEffect(() => {
-    const getUserAndPosts = async () => {
+    const initApp = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
         router.push("/");
@@ -41,11 +44,16 @@ export default function Feed() {
       const { data: profileData } = await supabase.from('profiles').select('username, is_verified, avatar_url, full_name').eq('id', session.user.id).single();
       if (profileData) setCurrentProfile(profileData);
 
-      fetchPosts();
       fetchNotifications(session.user.id);
     };
-    getUserAndPosts();
+    initApp();
   }, [router]);
+
+  useEffect(() => {
+    if (user) {
+      fetchPosts(activeTab);
+    }
+  }, [activeTab, user]);
 
   useEffect(() => {
     const searchProfiles = async () => {
@@ -62,9 +70,10 @@ export default function Feed() {
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery]);
 
-  const fetchPosts = async () => {
-    // UPDATED QUERY: We are now fetching the bookmarks array attached to the post
-    const { data, error } = await supabase
+  const fetchPosts = async (tab: 'foryou' | 'following') => {
+    setIsLoadingFeed(true);
+    
+    let query = supabase
       .from('posts')
       .select(`
         *, 
@@ -74,7 +83,21 @@ export default function Feed() {
         comments(*, profiles(username, avatar_url, full_name, is_verified))
       `)
       .order('created_at', { ascending: false });
+
+    if (tab === 'following' && user) {
+      const { data: follows } = await supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', user.id);
       
+      const followingIds = follows ? follows.map(f => f.following_id) : [];
+      // STRICT FOLLOWING UX: We removed followingIds.push(user.id) so you don't see your own posts here anymore
+
+      query = query.in('user_id', followingIds);
+    }
+      
+    const { data, error } = await query;
+
     if (data) {
       const sortedData = data.map(post => ({
         ...post,
@@ -82,6 +105,8 @@ export default function Feed() {
       }));
       setPosts(sortedData);
     }
+    
+    setIsLoadingFeed(false);
   };
 
   const fetchNotifications = async (userId: string) => {
@@ -149,25 +174,11 @@ export default function Feed() {
       if (error) throw error;
       setNewPost("");
       removeMedia();
-      fetchPosts();
+      fetchPosts(activeTab);
     } catch (error: any) {
       alert("Error posting: " + error.message);
     } finally {
       setIsPublishing(false);
-    }
-  };
-
-  const handleDeletePost = async (postId: number, imageUrl: string | null) => {
-    if (!window.confirm("Are you sure you want to delete this post?")) return;
-    try {
-      if (imageUrl) {
-        const fileName = imageUrl.split('/').pop();
-        if (fileName) await supabase.storage.from('post_media').remove([fileName]);
-      }
-      await supabase.from('posts').delete().eq('id', postId);
-      fetchPosts();
-    } catch (error: any) {
-      alert("Error deleting post: " + error.message);
     }
   };
 
@@ -181,10 +192,9 @@ export default function Feed() {
         await supabase.from('notifications').insert([{ recipient_id: postAuthorId, actor_id: user.id, type: 'like', post_id: postId }]);
       }
     }
-    fetchPosts();
+    fetchPosts(activeTab);
   };
 
-  // THE NEW BOOKMARK LOGIC
   const handleBookmark = async (postId: number, hasBookmarked: boolean) => {
     if (!user) return;
     if (hasBookmarked) {
@@ -192,7 +202,7 @@ export default function Feed() {
     } else {
       await supabase.from('bookmarks').insert([{ post_id: postId, user_id: user.id }]);
     }
-    fetchPosts();
+    fetchPosts(activeTab);
   };
 
   const handleSubmitComment = async (e: React.FormEvent, postAuthorId: string, postId: number) => {
@@ -203,7 +213,7 @@ export default function Feed() {
     setIsCommenting(false);
     if (!error) { 
       setCommentText(""); 
-      fetchPosts(); 
+      fetchPosts(activeTab); 
       if (postAuthorId !== user.id) {
         await supabase.from('notifications').insert([{ recipient_id: postAuthorId, actor_id: user.id, type: 'comment', post_id: postId }]);
       }
@@ -219,7 +229,7 @@ export default function Feed() {
     const { error } = await supabase.from('posts').insert([{ user_id: user.id, author_name: authorName, original_post_id: postId, content: "" }]);
     
     if (!error) {
-      fetchPosts();
+      fetchPosts(activeTab);
       if (postAuthorId !== user.id) {
         await supabase.from('notifications').insert([{ recipient_id: postAuthorId, actor_id: user.id, type: 'repost', post_id: postId }]);
       }
@@ -275,7 +285,6 @@ export default function Feed() {
         <div className="flex items-center gap-4 md:gap-6">
           <button className="text-indigo-600 dark:text-indigo-400"><Home className="w-5 h-5 md:w-6 md:h-6" /></button>
           
-          {/* THE NEW BOOKMARKS ICON IN NAVBAR */}
           <Link href="/bookmarks" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors" title="Bookmarks">
             <Bookmark className="w-5 h-5 md:w-6 md:h-6" />
           </Link>
@@ -365,7 +374,25 @@ export default function Feed() {
         </div>
       </nav>
 
-      <main className="max-w-2xl mx-auto mt-8 px-4 space-y-6 pb-12">
+      <main className="max-w-2xl mx-auto mt-4 px-4 space-y-6 pb-12">
+        
+        <div className="flex border-b border-slate-200 dark:border-slate-800 mb-2 bg-slate-50 dark:bg-slate-950 sticky top-[60px] z-40">
+          <button 
+            onClick={() => setActiveTab('foryou')}
+            className={`flex-1 py-4 text-sm font-bold transition-colors relative ${activeTab === 'foryou' ? 'text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          >
+            For You
+            {activeTab === 'foryou' && <div className="absolute bottom-0 left-0 w-full h-1 bg-indigo-500 rounded-t-full"></div>}
+          </button>
+          <button 
+            onClick={() => setActiveTab('following')}
+            className={`flex-1 py-4 text-sm font-bold transition-colors relative ${activeTab === 'following' ? 'text-slate-900 dark:text-white' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+          >
+            Following
+            {activeTab === 'following' && <div className="absolute bottom-0 left-0 w-full h-1 bg-indigo-500 rounded-t-full"></div>}
+          </button>
+        </div>
+
         <div className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 transition-colors duration-300 shadow-sm dark:shadow-none">
           <form onSubmit={handleCreatePost}>
             <textarea value={newPost} onChange={(e) => setNewPost(e.target.value)} placeholder="What are you building? (No humblebrags or corporate jargon allowed)" className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none min-h-[80px]" />
@@ -393,150 +420,154 @@ export default function Feed() {
           </form>
         </div>
 
-        <div className="space-y-4">
-          {posts.map((post) => {
-            const userHasLiked = post.likes?.some((like: any) => like.user_id === user?.id);
-            // NEW: Check if the current user has bookmarked this post
-            const userHasBookmarked = post.bookmarks?.some((bookmark: any) => bookmark.user_id === user?.id);
-            
-            const likeCount = post.likes?.length || 0;
-            const commentCount = post.comments?.length || 0;
-            const isCommentsOpen = activeCommentPostId === post.id;
-            const isMyPost = post.user_id === user?.id;
-
-            let isRepost = false;
-            let displayPost = post;
-            let displayProfile = post.profiles;
-
-            if (post.original_post_id) {
-               isRepost = true;
-               const localOriginal = posts.find(p => p.id === post.original_post_id);
-               if (localOriginal) {
-                 displayPost = localOriginal;
-                 displayProfile = localOriginal.profiles;
-               } else {
-                 displayPost = { ...post, content: "[This original post was deleted]", image_url: null };
-                 displayProfile = null;
-               }
-            }
-            if (Array.isArray(displayProfile)) displayProfile = displayProfile[0];
-
-            const displayVerified = displayProfile?.is_verified || false;
-            const displayUsername = displayProfile?.username || null;
-            const displayAvatar = displayProfile?.avatar_url || null;
-
-            return (
-              <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
+        {isLoadingFeed ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="w-8 h-8 text-slate-400 animate-spin" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {posts.length === 0 ? (
+              <div className="text-center p-8 text-slate-500 border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900/50 shadow-sm">
+                {activeTab === 'following' 
+                  ? "You aren't following anyone yet, or they haven't posted." 
+                  : "No posts found. Be the first to build in public!"}
+              </div>
+            ) : (
+              posts.map((post) => {
+                const userHasLiked = post.likes?.some((like: any) => like.user_id === user?.id);
+                const userHasBookmarked = post.bookmarks?.some((bookmark: any) => bookmark.user_id === user?.id);
                 
-                {isRepost && (
-                  <div className="flex items-center gap-2 text-xs text-slate-500 font-medium mb-3 ml-2">
-                    <Repeat className="w-3.5 h-3.5" />
-                    <span>{post.author_name} reposted</span>
-                  </div>
-                )}
+                const likeCount = post.likes?.length || 0;
+                const commentCount = post.comments?.length || 0;
+                const isCommentsOpen = activeCommentPostId === post.id;
 
-                <div className={isRepost ? "border border-slate-100 dark:border-slate-800/80 rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/30" : ""}>
-                  <div className="flex justify-between items-start mb-3">
-                    <Link href={`/profile/${displayPost.user_id}`} className="flex items-start gap-3 hover:opacity-80 transition-opacity">
-                      <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300 mt-1 overflow-hidden shrink-0">
-                        {displayAvatar ? <img src={displayAvatar} alt="Avatar" className="w-full h-full object-cover" /> : (displayPost.author_name ? displayPost.author_name.charAt(0).toUpperCase() : "U")}
+                let isRepost = false;
+                let displayPost = post;
+                let displayProfile = post.profiles;
+
+                if (post.original_post_id) {
+                   isRepost = true;
+                   const localOriginal = posts.find(p => p.id === post.original_post_id);
+                   if (localOriginal) {
+                     displayPost = localOriginal;
+                     displayProfile = localOriginal.profiles;
+                   } else {
+                     displayPost = { ...post, content: "[This original post was deleted]", image_url: null };
+                     displayProfile = null;
+                   }
+                }
+                if (Array.isArray(displayProfile)) displayProfile = displayProfile[0];
+
+                const displayVerified = displayProfile?.is_verified || false;
+                const displayUsername = displayProfile?.username || null;
+                const displayAvatar = displayProfile?.avatar_url || null;
+
+                return (
+                  <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
+                    
+                    {isRepost && (
+                      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium mb-3 ml-2">
+                        <Repeat className="w-3.5 h-3.5" />
+                        <span>{post.author_name} reposted</span>
                       </div>
-                      <div>
-                        <h4 className="text-sm font-bold flex items-center gap-1 text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
-                          {displayPost.author_name || "Anonymous Rebel"}
-                          {displayVerified && <BadgeCheck className="w-4 h-4 text-blue-500" />}
-                        </h4>
-                        <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                          {displayUsername && <span className="font-medium text-indigo-600 dark:text-indigo-400">@{displayUsername}</span>}
-                          {displayUsername && <span>•</span>}
-                          <span>{displayPost.created_at ? new Date(displayPost.created_at).toLocaleDateString() : "Just now"}</span>
-                        </div>
-                      </div>
-                    </Link>
-
-                    {isMyPost && (
-                      <button onClick={() => handleDeletePost(post.id, post.image_url)} className="p-2 -mt-2 -mr-2 text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 rounded-full transition-colors group">
-                        <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                      </button>
                     )}
-                  </div>
-                  
-                  {displayPost.content && <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{renderContentWithTags(displayPost.content)}</p>}
-                  {displayPost.image_url && (
-                    <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-900/50">
-                      <img src={displayPost.image_url} alt="Post attachment" className="w-full h-auto max-h-[500px] object-cover" />
-                    </div>
-                  )}
-                </div>
-                
-                {/* UPGRADED ENGAGEMENT BAR WITH BOOKMARK */}
-                <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/50 pt-3 mt-3">
-                  <div className="flex items-center gap-6">
-                    <button onClick={() => handleLike(displayPost.user_id, post.id, userHasLiked)} className={`flex items-center gap-1.5 text-sm transition-colors ${userHasLiked ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400'}`}>
-                      <Heart className={`w-4 h-4 ${userHasLiked ? 'fill-current' : ''}`} />
-                      <span className="font-medium">{likeCount}</span>
-                    </button>
-                    <button onClick={() => { setActiveCommentPostId(isCommentsOpen ? null : post.id); setCommentText(""); }} className={`flex items-center gap-1.5 text-sm transition-colors ${isCommentsOpen ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400'}`}>
-                      <MessageCircle className={`w-4 h-4 ${isCommentsOpen ? 'fill-current' : ''}`} />
-                      <span className="font-medium">{commentCount}</span>
-                    </button>
-                    {!isRepost && ( 
-                      <button onClick={() => handleRepost(displayPost.user_id, post.id)} className="flex items-center gap-1.5 text-sm transition-colors text-slate-500 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400">
-                        <Repeat className="w-4 h-4" />
-                        <span className="hidden sm:inline">Repost</span>
-                      </button>
-                    )}
-                  </div>
-                  
-                  {/* BOOKMARK BUTTON */}
-                  <button onClick={() => handleBookmark(post.id, userHasBookmarked)} className={`p-1.5 rounded-full transition-colors ${userHasBookmarked ? 'text-amber-500' : 'text-slate-500 dark:text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30'}`}>
-                    <Bookmark className={`w-4 h-4 ${userHasBookmarked ? 'fill-current' : ''}`} />
-                  </button>
-                </div>
 
-                {isCommentsOpen && (
-                  <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
-                    <div className="space-y-4 mb-4 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                      {post.comments?.length === 0 ? (
-                        <p className="text-sm text-center text-slate-500 py-2">No comments yet. Be the first!</p>
-                      ) : (
-                        post.comments?.map((comment: any) => {
-                          let cProfile = comment.profiles;
-                          if (Array.isArray(cProfile)) cProfile = cProfile[0];
-                          return (
-                            <div key={comment.id} className="flex gap-3">
-                              <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 text-xs">
-                                {cProfile?.avatar_url ? <img src={cProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (cProfile?.full_name ? cProfile.full_name.charAt(0).toUpperCase() : "U")}
-                              </div>
-                              <div className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-2xl rounded-tl-none px-4 py-2.5">
-                                <div className="flex items-center gap-1 mb-0.5">
-                                  <span className="text-sm font-bold text-slate-900 dark:text-slate-200">{cProfile?.full_name || "User"}</span>
-                                  {cProfile?.is_verified && <BadgeCheck className="w-3.5 h-3.5 text-blue-500" />}
-                                </div>
-                                <p className="text-sm text-slate-700 dark:text-slate-300">{comment.content}</p>
-                              </div>
+                    <div className={isRepost ? "border border-slate-100 dark:border-slate-800/80 rounded-xl p-4 bg-slate-50/50 dark:bg-slate-900/30" : ""}>
+                      <div className="flex justify-between items-start mb-3">
+                        <Link href={`/profile/${displayPost.user_id}`} className="flex items-start gap-3 hover:opacity-80 transition-opacity">
+                          <div className="w-10 h-10 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold transition-colors duration-300 mt-1 overflow-hidden shrink-0">
+                            {displayAvatar ? <img src={displayAvatar} alt="Avatar" className="w-full h-full object-cover" /> : (displayPost.author_name ? displayPost.author_name.charAt(0).toUpperCase() : "U")}
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold flex items-center gap-1 text-slate-900 dark:text-slate-200 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors">
+                              {displayPost.author_name || "Anonymous Rebel"}
+                              {displayVerified && <BadgeCheck className="w-4 h-4 text-blue-500" />}
+                            </h4>
+                            <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                              {displayUsername && <span className="font-medium text-indigo-600 dark:text-indigo-400">@{displayUsername}</span>}
+                              {displayUsername && <span>•</span>}
+                              <span>{displayPost.created_at ? new Date(displayPost.created_at).toLocaleDateString() : "Just now"}</span>
                             </div>
-                          );
-                        })
+                          </div>
+                        </Link>
+                      </div>
+                      
+                      {displayPost.content && <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{renderContentWithTags(displayPost.content)}</p>}
+                      {displayPost.image_url && (
+                        <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-900/50">
+                          <img src={displayPost.image_url} alt="Post attachment" className="w-full h-auto max-h-[500px] object-cover" />
+                        </div>
                       )}
                     </div>
-                    <form onSubmit={(e) => handleSubmitComment(e, displayPost.user_id, post.id)} className="flex gap-3 items-start">
-                      <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 mt-0.5">
-                        {currentProfile?.avatar_url ? <img src={currentProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (currentProfile?.full_name?.charAt(0).toUpperCase() || "U")}
-                      </div>
-                      <div className="flex-1 relative">
-                        <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment..." className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-2 pr-12 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-colors" />
-                        <button type="submit" disabled={!commentText.trim() || isCommenting} className="absolute right-1.5 top-1.5 p-1 text-white bg-indigo-600 hover:bg-indigo-700 rounded-full disabled:opacity-50 transition-colors">
-                          <Send className="w-3.5 h-3.5 -ml-0.5" />
+                    
+                    <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800/50 pt-3 mt-3">
+                      <div className="flex items-center gap-6">
+                        <button onClick={() => handleLike(displayPost.user_id, post.id, userHasLiked)} className={`flex items-center gap-1.5 text-sm transition-colors ${userHasLiked ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400 hover:text-rose-500 dark:hover:text-rose-400'}`}>
+                          <Heart className={`w-4 h-4 ${userHasLiked ? 'fill-current' : ''}`} />
+                          <span className="font-medium">{likeCount}</span>
                         </button>
+                        <button onClick={() => { setActiveCommentPostId(isCommentsOpen ? null : post.id); setCommentText(""); }} className={`flex items-center gap-1.5 text-sm transition-colors ${isCommentsOpen ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400'}`}>
+                          <MessageCircle className={`w-4 h-4 ${isCommentsOpen ? 'fill-current' : ''}`} />
+                          <span className="font-medium">{commentCount}</span>
+                        </button>
+                        {!isRepost && ( 
+                          <button onClick={() => handleRepost(displayPost.user_id, post.id)} className="flex items-center gap-1.5 text-sm transition-colors text-slate-500 dark:text-slate-400 hover:text-green-600 dark:hover:text-green-400">
+                            <Repeat className="w-4 h-4" />
+                            <span className="hidden sm:inline">Repost</span>
+                          </button>
+                        )}
                       </div>
-                    </form>
+                      
+                      <button onClick={() => handleBookmark(post.id, userHasBookmarked)} className={`p-1.5 rounded-full transition-colors ${userHasBookmarked ? 'text-amber-500' : 'text-slate-500 dark:text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/30'}`}>
+                        <Bookmark className={`w-4 h-4 ${userHasBookmarked ? 'fill-current' : ''}`} />
+                      </button>
+                    </div>
+
+                    {isCommentsOpen && (
+                      <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/50">
+                        <div className="space-y-4 mb-4 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                          {post.comments?.length === 0 ? (
+                            <p className="text-sm text-center text-slate-500 py-2">No comments yet. Be the first!</p>
+                          ) : (
+                            post.comments?.map((comment: any) => {
+                              let cProfile = comment.profiles;
+                              if (Array.isArray(cProfile)) cProfile = cProfile[0];
+                              return (
+                                <div key={comment.id} className="flex gap-3">
+                                  <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 text-xs">
+                                    {cProfile?.avatar_url ? <img src={cProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (cProfile?.full_name ? cProfile.full_name.charAt(0).toUpperCase() : "U")}
+                                  </div>
+                                  <div className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800/80 rounded-2xl rounded-tl-none px-4 py-2.5">
+                                    <div className="flex items-center gap-1 mb-0.5">
+                                      <span className="text-sm font-bold text-slate-900 dark:text-slate-200">{cProfile?.full_name || "User"}</span>
+                                      {cProfile?.is_verified && <BadgeCheck className="w-3.5 h-3.5 text-blue-500" />}
+                                    </div>
+                                    <p className="text-sm text-slate-700 dark:text-slate-300">{comment.content}</p>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                        <form onSubmit={(e) => handleSubmitComment(e, displayPost.user_id, post.id)} className="flex gap-3 items-start">
+                          <div className="w-8 h-8 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center text-slate-600 dark:text-slate-400 font-bold overflow-hidden shrink-0 mt-0.5">
+                            {currentProfile?.avatar_url ? <img src={currentProfile.avatar_url} alt="Avatar" className="w-full h-full object-cover" /> : (currentProfile?.full_name?.charAt(0).toUpperCase() || "U")}
+                          </div>
+                          <div className="flex-1 relative">
+                            <input type="text" value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment..." className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-full px-4 py-2 pr-12 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-colors" />
+                            <button type="submit" disabled={!commentText.trim() || isCommenting} className="absolute right-1.5 top-1.5 p-1 text-white bg-indigo-600 hover:bg-indigo-700 rounded-full disabled:opacity-50 transition-colors">
+                              <Send className="w-3.5 h-3.5 -ml-0.5" />
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                );
+              })
+            )}
+          </div>
+        )}
       </main>
     </div>
   );

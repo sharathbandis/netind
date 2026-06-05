@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Heart, UserPlus, UserCheck, BadgeCheck, Link as LinkIcon, Calendar, Loader2 } from "lucide-react";
+import { ArrowLeft, Heart, UserPlus, UserCheck, BadgeCheck, Link as LinkIcon, Calendar, Loader2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
@@ -16,19 +16,16 @@ export default function ProfilePage() {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Your Original Network States
   const [isFollowing, setIsFollowing] = useState(false);
   const [followerCount, setFollowerCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
 
   useEffect(() => {
     const fetchEverything = async () => {
-      // 1. Get logged-in user
       const { data: { session } } = await supabase.auth.getSession();
       const user = session?.user;
       setCurrentUser(user || null);
 
-      // 2. Get this profile's specific info
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
@@ -37,7 +34,6 @@ export default function ProfilePage() {
       
       if (profile) setProfileData(profile);
 
-      // 3. Fetch their posts
       const { data: postsData } = await supabase
         .from('posts')
         .select('*, likes(user_id), profiles(is_verified, username, avatar_url, full_name)')
@@ -46,7 +42,6 @@ export default function ProfilePage() {
 
       if (postsData) setPosts(postsData);
 
-      // 4. Fetch Follow Stats
       const { count: followers } = await supabase
         .from('follows')
         .select('*', { count: 'exact', head: true })
@@ -60,7 +55,6 @@ export default function ProfilePage() {
       setFollowerCount(followers || 0);
       setFollowingCount(following || 0);
 
-      // 5. Check if the current user is already following them
       if (user && user.id !== profileId) {
         const { data: followData } = await supabase
           .from('follows')
@@ -78,26 +72,22 @@ export default function ProfilePage() {
     if (profileId) fetchEverything();
   }, [profileId]);
 
-  // YOUR ORIGINAL FOLLOW LOGIC
   const handleToggleFollow = async () => {
     if (!currentUser) return;
 
     if (isFollowing) {
-      // Unfollow
       await supabase.from('follows').delete()
         .eq('follower_id', currentUser.id)
         .eq('following_id', profileId);
       setIsFollowing(false);
       setFollowerCount(prev => prev - 1);
     } else {
-      // Follow
       await supabase.from('follows').insert([
         { follower_id: currentUser.id, following_id: profileId }
       ]);
       setIsFollowing(true);
       setFollowerCount(prev => prev + 1);
       
-      // Send notification for following
       await supabase.from('notifications').insert([{ 
         recipient_id: profileId, 
         actor_id: currentUser.id, 
@@ -114,13 +104,28 @@ export default function ProfilePage() {
       await supabase.from('likes').insert([{ post_id: postId, user_id: currentUser.id }]);
     }
     
-    // Silent refresh of posts to update hearts
     const { data } = await supabase
         .from('posts')
         .select('*, likes(user_id), profiles(is_verified, username, avatar_url, full_name)')
         .eq('user_id', profileId)
         .order('created_at', { ascending: false });
     if (data) setPosts(data);
+  };
+
+  // THE RESTORED DELETE FUNCTION FOR PROFILE PAGE
+  const handleDeletePost = async (postId: number, imageUrl: string | null) => {
+    if (!window.confirm("Are you sure you want to delete this post?")) return;
+    try {
+      if (imageUrl) {
+        const fileName = imageUrl.split('/').pop();
+        if (fileName) await supabase.storage.from('post_media').remove([fileName]);
+      }
+      await supabase.from('posts').delete().eq('id', postId);
+      // Remove it from the local state instantly
+      setPosts(currentPosts => currentPosts.filter(p => p.id !== postId));
+    } catch (error: any) {
+      alert("Error deleting post: " + error.message);
+    }
   };
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center dark:bg-slate-950 dark:text-white"><Loader2 className="w-8 h-8 animate-spin" /></div>;
@@ -146,10 +151,8 @@ export default function ProfilePage() {
 
       <main className="max-w-2xl mx-auto">
         
-        {/* NEW RICH PROFILE CARD */}
         <div className="bg-white dark:bg-slate-900 border-b border-x border-slate-200 dark:border-slate-800 rounded-b-xl overflow-hidden mb-6 shadow-sm">
           
-          {/* Cover Banner */}
           <div className="h-32 md:h-48 bg-slate-200 dark:bg-slate-800 relative">
             {profileData.cover_url ? (
               <img src={profileData.cover_url} alt="Cover" className="w-full h-full object-cover" />
@@ -160,7 +163,6 @@ export default function ProfilePage() {
 
           <div className="px-4 pb-6">
             <div className="flex justify-between items-start">
-              {/* Avatar (Overlapping Banner) */}
               <div className="-mt-12 md:-mt-16 relative z-10 w-24 h-24 md:w-32 md:h-32 bg-white dark:bg-slate-900 rounded-full p-1 border-2 border-slate-200 dark:border-slate-800">
                 <div className="w-full h-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex items-center justify-center">
                   {profileData.avatar_url ? (
@@ -171,7 +173,6 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* Action Button (Edit Profile OR Follow) */}
               <div className="mt-4">
                 {isMyProfile ? (
                   <Link href="/edit-profile" className="px-4 py-2 rounded-full border border-slate-300 dark:border-slate-600 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
@@ -196,7 +197,6 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* Profile Info */}
             <div className="mt-3">
               <h1 className="text-xl md:text-2xl font-bold flex items-center gap-1.5">
                 {displayName}
@@ -207,14 +207,12 @@ export default function ProfilePage() {
               )}
             </div>
 
-            {/* Bio */}
             {profileData.bio && (
               <div className="mt-4 text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
                 {profileData.bio}
               </div>
             )}
 
-            {/* Metadata Links */}
             <div className="mt-4 flex flex-wrap items-center gap-4 text-sm text-slate-500">
               {profileData.website && (
                 <div className="flex items-center gap-1.5 hover:text-indigo-500 transition-colors">
@@ -230,7 +228,6 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            {/* YOUR ORIGINAL NETWORK STATS RESTORED */}
             <div className="flex items-center gap-6 mt-6 pt-6 border-t border-slate-100 dark:border-slate-800/50">
               <div className="flex flex-col">
                 <span className="text-lg font-bold text-slate-900 dark:text-white">{posts.length}</span>
@@ -248,7 +245,6 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* User's Timeline */}
         <div className="space-y-4 px-2 md:px-0">
           <h2 className="font-bold text-lg mb-2">Posts</h2>
           {posts.length === 0 ? (
@@ -263,24 +259,31 @@ export default function ProfilePage() {
               return (
                 <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
                   
-                  {/* Added Author Header back to timeline */}
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
-                       {profileData.avatar_url ? (
-                         <img src={profileData.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-                       ) : (
-                         <span className="font-bold text-slate-400">{displayInitial}</span>
-                       )}
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
+                         {profileData.avatar_url ? (
+                           <img src={profileData.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                         ) : (
+                           <span className="font-bold text-slate-400">{displayInitial}</span>
+                         )}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm">{displayName}</h4>
+                        <p className="text-xs text-slate-500">{new Date(post.created_at).toLocaleDateString()}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold text-sm">{displayName}</h4>
-                      <p className="text-xs text-slate-500">{new Date(post.created_at).toLocaleDateString()}</p>
-                    </div>
+                    
+                    {/* NEW: ONLY THE PROFILE OWNER SEES THE TRASH CAN HERE */}
+                    {isMyProfile && (
+                      <button onClick={() => handleDeletePost(post.id, post.image_url)} className="p-2 -mt-2 -mr-2 text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 rounded-full transition-colors group">
+                        <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                      </button>
+                    )}
                   </div>
 
                   <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{post.content}</p>
                   
-                  {/* Preserved Image Rendering if they have images */}
                   {post.image_url && (
                     <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
                       <img src={post.image_url} alt="Post attachment" className="w-full h-auto max-h-[500px] object-cover" />
