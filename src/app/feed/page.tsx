@@ -89,7 +89,8 @@ export default function Feed() {
         if (post.content) {
           const tags = post.content.match(/(#[a-zA-Z0-9_]+)/g);
           if (tags) {
-            tags.forEach(tag => {
+            // THE FIX: We explicitly tell TypeScript that 'tag' is a string
+            tags.forEach((tag: string) => {
               const cleanTag = tag.toLowerCase();
               tagCounts[cleanTag] = (tagCounts[cleanTag] || 0) + 1;
             });
