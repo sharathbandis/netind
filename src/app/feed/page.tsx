@@ -94,6 +94,22 @@ export default function Feed() {
     if (data) setNotifications(data);
   };
 
+  const renderContentWithTags = (text: string) => {
+    if (!text) return null;
+    const parts = text.split(/(#[a-zA-Z0-9_]+)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('#')) {
+        const tag = part.slice(1);
+        return (
+          <Link key={i} href={`/tag/${tag}`} className="text-indigo-500 dark:text-indigo-400 hover:underline font-medium">
+            {part}
+          </Link>
+        );
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
+
   const markNotificationsRead = async () => {
     if (!user || unreadCount === 0) return;
     await supabase.from('notifications').update({ is_read: true }).eq('recipient_id', user.id);
@@ -445,7 +461,7 @@ export default function Feed() {
                     )}
                   </div>
                   
-                  {displayPost.content && <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{displayPost.content}</p>}
+                  {displayPost.content && <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{renderContentWithTags(displayPost.content)}</p>}
                   {displayPost.image_url && (
                     <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-900/50">
                       <img src={displayPost.image_url} alt="Post attachment" className="w-full h-auto max-h-[500px] object-cover" />
