@@ -654,7 +654,7 @@ export default function Feed() {
           </div>
 
           <div className="mt-4 text-xs text-slate-500 text-center px-4">
-            <p>© 2026 Netind. Built by you.</p>
+            <p>© 2026 Netind. Built by Team Netind.</p>
           </div>
         </div>
 

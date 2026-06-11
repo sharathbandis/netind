@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Heart, UserPlus, UserCheck, BadgeCheck, Link as LinkIcon, Calendar, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeft, Heart, UserPlus, UserCheck, BadgeCheck, Link as LinkIcon, Calendar, Loader2, Trash2, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
@@ -36,7 +36,7 @@ export default function ProfilePage() {
 
       const { data: postsData } = await supabase
         .from('posts')
-        .select('*, likes(user_id), profiles(is_verified, username, avatar_url, full_name)')
+        .select('*, likes(user_id), bookmarks(user_id), profiles(is_verified, username, avatar_url, full_name)')
         .eq('user_id', profileId)
         .order('created_at', { ascending: false });
 
@@ -106,13 +106,12 @@ export default function ProfilePage() {
     
     const { data } = await supabase
         .from('posts')
-        .select('*, likes(user_id), profiles(is_verified, username, avatar_url, full_name)')
+        .select('*, likes(user_id), bookmarks(user_id), profiles(is_verified, username, avatar_url, full_name)')
         .eq('user_id', profileId)
         .order('created_at', { ascending: false });
     if (data) setPosts(data);
   };
 
-  // THE RESTORED DELETE FUNCTION FOR PROFILE PAGE
   const handleDeletePost = async (postId: number, imageUrl: string | null) => {
     if (!window.confirm("Are you sure you want to delete this post?")) return;
     try {
@@ -121,7 +120,6 @@ export default function ProfilePage() {
         if (fileName) await supabase.storage.from('post_media').remove([fileName]);
       }
       await supabase.from('posts').delete().eq('id', postId);
-      // Remove it from the local state instantly
       setPosts(currentPosts => currentPosts.filter(p => p.id !== postId));
     } catch (error: any) {
       alert("Error deleting post: " + error.message);
@@ -179,20 +177,31 @@ export default function ProfilePage() {
                     Edit Profile
                   </Link>
                 ) : (
-                  <button 
-                    onClick={handleToggleFollow}
-                    className={`flex items-center gap-2 px-5 py-2 rounded-full font-bold text-sm transition-all ${
-                      isFollowing 
-                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-red-50 hover:text-red-600 border border-slate-200 dark:border-slate-700' 
-                        : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
-                    }`}
-                  >
-                    {isFollowing ? (
-                      <><UserCheck className="w-4 h-4" /> Following</>
-                    ) : (
-                      <><UserPlus className="w-4 h-4" /> Follow</>
-                    )}
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <button 
+                      onClick={handleToggleFollow}
+                      className={`flex items-center gap-2 px-5 py-2 rounded-full font-bold text-sm transition-all ${
+                        isFollowing 
+                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-red-50 hover:text-red-600 border border-slate-200 dark:border-slate-700' 
+                          : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-sm'
+                      }`}
+                    >
+                      {isFollowing ? (
+                        <><UserCheck className="w-4 h-4" /> Following</>
+                      ) : (
+                        <><UserPlus className="w-4 h-4" /> Follow</>
+                      )}
+                    </button>
+                    
+                    {/* NEW MESSAGE BUTTON */}
+                    <Link 
+                      href="/messages" 
+                      className="flex items-center gap-2 px-5 py-2 rounded-full font-bold text-sm bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span className="hidden sm:inline">Message</span>
+                    </Link>
+                  </div>
                 )}
               </div>
             </div>
@@ -274,7 +283,6 @@ export default function ProfilePage() {
                       </div>
                     </div>
                     
-                    {/* NEW: ONLY THE PROFILE OWNER SEES THE TRASH CAN HERE */}
                     {isMyProfile && (
                       <button onClick={() => handleDeletePost(post.id, post.image_url)} className="p-2 -mt-2 -mr-2 text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 rounded-full transition-colors group">
                         <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
