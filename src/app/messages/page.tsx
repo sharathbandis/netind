@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { ArrowLeft, Send, Loader2, BadgeCheck, MessageCircle, Search } from "lucide-react";
+import { ArrowLeft, Send, Loader2, BadgeCheck, MessageCircle, Search, Users } from "lucide-react";
 import Link from "next/link";
 
 export default function Messages() {
