@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Heart, UserPlus, UserCheck, BadgeCheck, Link as LinkIcon, Calendar, Loader2, Trash2, MessageCircle } from "lucide-react";
+import { ArrowLeft, Heart, UserPlus, UserCheck, BadgeCheck, Link as LinkIcon, Calendar, Loader2, Trash2, MessageCircle, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 
@@ -34,6 +34,7 @@ export default function ProfilePage() {
       
       if (profile) setProfileData(profile);
 
+      // UPGRADED: Now fetches media_attachments so profiles support videos/carousels
       const { data: postsData } = await supabase
         .from('posts')
         .select('*, likes(user_id), bookmarks(user_id), profiles(is_verified, username, avatar_url, full_name)')
@@ -112,15 +113,21 @@ export default function ProfilePage() {
     if (data) setPosts(data);
   };
 
-  const handleDeletePost = async (postId: number, imageUrl: string | null) => {
+  const handleDeletePost = async (post: any) => {
     if (!window.confirm("Are you sure you want to delete this post?")) return;
     try {
-      if (imageUrl) {
-        const fileName = imageUrl.split('/').pop();
-        if (fileName) await supabase.storage.from('post_media').remove([fileName]);
+      // Safely delete multi-media arrays from storage
+      const attachments = post.media_attachments || [];
+      const filesToRemove = attachments.map((media: any) => media.url.split('/').pop());
+      if (post.image_url && !filesToRemove.includes(post.image_url.split('/').pop())) {
+        filesToRemove.push(post.image_url.split('/').pop());
       }
-      await supabase.from('posts').delete().eq('id', postId);
-      setPosts(currentPosts => currentPosts.filter(p => p.id !== postId));
+      if (filesToRemove.length > 0) {
+        await supabase.storage.from('post_media').remove(filesToRemove);
+      }
+
+      await supabase.from('posts').delete().eq('id', post.id);
+      setPosts(currentPosts => currentPosts.filter(p => p.id !== post.id));
     } catch (error: any) {
       alert("Error deleting post: " + error.message);
     }
@@ -133,6 +140,22 @@ export default function ProfilePage() {
   const displayInitial = displayName.charAt(0).toUpperCase();
   const isMyProfile = currentUser?.id === profileId;
   const joinDate = new Date(profileData?.created_at || Date.now()).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  // Render Tags Function
+  const renderContentWithTags = (text: string) => {
+    if (!text) return null;
+    const parts = text.split(/(#[a-zA-Z0-9_]+)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('#')) {
+        return (
+          <Link key={i} href={`/tag/${part.slice(1)}`} className="text-indigo-500 dark:text-indigo-400 hover:underline font-medium">
+            {part}
+          </Link>
+        );
+      }
+      return <span key={i}>{part}</span>;
+    });
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50 font-sans pb-12 transition-colors duration-300">
@@ -173,9 +196,20 @@ export default function ProfilePage() {
 
               <div className="mt-4">
                 {isMyProfile ? (
-                  <Link href="/edit-profile" className="px-4 py-2 rounded-full border border-slate-300 dark:border-slate-600 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                    Edit Profile
-                  </Link>
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    {/* NEW: Analytics Button (Only visible to the profile owner) */}
+                    <Link 
+                      href="/analytics" 
+                      className="flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-bold text-sm hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                    >
+                      <BarChart3 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Analytics</span>
+                    </Link>
+                    
+                    <Link href="/edit-profile" className="px-4 py-2 rounded-full border border-slate-300 dark:border-slate-600 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                      Edit Profile
+                    </Link>
+                  </div>
                 ) : (
                   <div className="flex items-center gap-2 flex-wrap justify-end">
                     <button 
@@ -193,7 +227,6 @@ export default function ProfilePage() {
                       )}
                     </button>
                     
-                    {/* NEW MESSAGE BUTTON */}
                     <Link 
                       href="/messages" 
                       className="flex items-center gap-2 px-5 py-2 rounded-full font-bold text-sm bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors border border-slate-200 dark:border-slate-700"
@@ -265,6 +298,12 @@ export default function ProfilePage() {
               const userHasLiked = post.likes?.some((like: any) => like.user_id === currentUser?.id);
               const likeCount = post.likes?.length || 0;
 
+              // UPGRADED: Consolidate legacy image_url and new media_attachments for the profile page
+              let mediaArray = post.media_attachments || [];
+              if (mediaArray.length === 0 && post.image_url) {
+                mediaArray = [{ url: post.image_url, type: 'image' }];
+              }
+
               return (
                 <div key={post.id} className="bg-white dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5 transition-colors duration-300 shadow-sm dark:shadow-none">
                   
@@ -284,17 +323,28 @@ export default function ProfilePage() {
                     </div>
                     
                     {isMyProfile && (
-                      <button onClick={() => handleDeletePost(post.id, post.image_url)} className="p-2 -mt-2 -mr-2 text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 rounded-full transition-colors group">
+                      <button onClick={() => handleDeletePost(post)} className="p-2 -mt-2 -mr-2 text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-500 rounded-full transition-colors group">
                         <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
                       </button>
                     )}
                   </div>
 
-                  <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">{post.content}</p>
+                  <p className="text-slate-700 dark:text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mb-4">
+                    {renderContentWithTags(post.content)}
+                  </p>
                   
-                  {post.image_url && (
-                    <div className="mb-4 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800">
-                      <img src={post.image_url} alt="Post attachment" className="w-full h-auto max-h-[500px] object-cover" />
+                  {/* UPGRADED: Multi-Media Grid Renderer for Profile */}
+                  {mediaArray.length > 0 && (
+                    <div className={`mb-4 grid gap-1.5 ${mediaArray.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                      {mediaArray.map((media: any, idx: number) => (
+                        <div key={idx} className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800/80 bg-slate-100 dark:bg-slate-900/50 aspect-video md:aspect-auto">
+                          {media.type === 'video' ? (
+                            <video src={media.url} controls playsInline preload="metadata" className="w-full h-full object-cover max-h-[500px]" />
+                          ) : (
+                            <img src={media.url} alt={`Attachment ${idx}`} className="w-full h-full object-cover max-h-[500px]" />
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
 
