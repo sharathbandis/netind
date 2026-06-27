@@ -62,6 +62,28 @@ export default function Home() {
     }
   };
 
+  // --- FORGOT PASSWORD LOGIC ---
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      alert("Please enter your email address first so we know where to send the link.");
+      return;
+    }
+    setLoading(true);
+    
+    // Supabase sends an email with a secure link
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/update-password`, 
+    });
+    
+    if (error) {
+      alert("Error: " + error.message);
+    } else {
+      alert("Check your inbox! We sent a password reset link.");
+    }
+    setLoading(false);
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-950 text-slate-50 font-sans selection:bg-indigo-500/30">
       
@@ -151,12 +173,26 @@ export default function Home() {
               />
             </div>
 
+            {/* THE MISSING BUTTON IS ADDED HERE */}
+            {isLogin && (
+              <div className="flex justify-end pt-1">
+                <button 
+                  type="button" 
+                  onClick={handleForgotPassword}
+                  disabled={loading}
+                  className="text-sm font-medium text-indigo-400 hover:text-indigo-300 hover:underline transition-colors"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
+            
             {message && (
               <div className={`p-3 rounded-lg text-sm ${message.type === 'error' ? 'bg-red-900/50 text-red-200 border-red-800' : 'bg-green-900/50 text-green-200 border-green-800'}`}>
                 {message.text}
               </div>
             )}
-
+          
             <button type="submit" disabled={loading} className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-all disabled:opacity-50">
               {loading ? "Processing..." : (isLogin ? "Sign In" : "Join with Email")}
               {!loading && <ArrowRight className="w-4 h-4" />}
